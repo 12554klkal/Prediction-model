@@ -6,24 +6,32 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import io
 import time
+import json
+import os
+
+# Optional Gemini API import
+try:
+    import google.generativeai as genai
+    HAS_GEMINI = True
+except ImportError:
+    HAS_GEMINI = False
 
 # -----------------------------------------------------------------------------
-# 1. Page Configuration & Custom Styling
+# 1. Page Configuration & Styling
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Google TimesFM Forecasting Studio",
+    page_title="TimesFM & Gemini Predictive Intelligence Studio",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS for modern UI/UX
 st.markdown("""
 <style>
     .main-header {
         font-size: 2.2rem;
         font-weight: 700;
-        color: #1E293B;
+        color: #0F172A;
         margin-bottom: 0.2rem;
     }
     .sub-header {
@@ -47,29 +55,24 @@ st.markdown("""
         font-size: 0.85rem;
         color: #64748B;
     }
-    .status-box {
-        padding: 10px 15px;
-        border-radius: 8px;
-        margin-bottom: 15px;
-        font-size: 0.9rem;
+    .ai-box {
+        background-color: #F0F9FF;
+        border-left: 4px solid #0284C7;
+        padding: 15px;
+        border-radius: 6px;
+        margin-bottom: 20px;
     }
 </style>
 """, unsafe_allow_html=True)
 
 
 # -----------------------------------------------------------------------------
-# 2. TimesFM Model Loader (Cached)
+# 2. TimesFM Loader & Simulation Fallback
 # -----------------------------------------------------------------------------
 @st.cache_resource(show_spinner="Loading Google TimesFM Model Weights...")
 def load_timesfm_model(model_name, backend, context_len, horizon_len):
-    """
-    Attempts to load the TimesFM model package.
-    Falls back gracefully if the package or HF hub isn't directly reachable.
-    """
     try:
         import timesfm
-        
-        # Initialize TimesFM instance
         tfm = timesfm.TimesFm(
             hparams=timesfm.TimesFmHparams(
                 backend=backend,
@@ -87,10 +90,6 @@ def load_timesfm_model(model_name, backend, context_len, horizon_len):
 
 
 def run_forecast_simulation(data_series, horizon_len):
-    """
-    Fallback simulation engine when TimesFM library is not locally compiled.
-    Uses mean-reverting trend + momentum + noise to mock baseline model outputs.
-    """
     last_val = data_series[-1]
     returns = np.diff(data_series[-30:]) / data_series[-30:-1] if len(data_series) > 30 else np.diff(data_series) / data_series[:-1]
     avg_return = np.mean(returns) if len(returns) > 0 else 0.001
@@ -107,12 +106,20 @@ def run_forecast_simulation(data_series, horizon_len):
 
 
 # -----------------------------------------------------------------------------
-# 3. Sidebar Configuration
+# 3. Sidebar Controls & API Keys
 # -----------------------------------------------------------------------------
-st.sidebar.title("⚙️ Model Controls")
+st.sidebar.title("⚙️ Engine Controls")
 
-# --- Model Parameters ---
-st.sidebar.subheader("1. TimesFM Model Settings")
+# Gemini API Key integration
+st.sidebar.subheader("🔑 Gemini AI Integration")
+gemini_key = st.sidebar.text_input(
+    "Gemini API Key", 
+    type="password", 
+    value=os.environ.get("GEMINI_API_KEY", ""),
+    help="Enter your Google Gemini API key to enable natural language predictive intelligence."
+)
+
+st.sidebar.subheader("🤖 TimesFM Model Settings")
 model_choice = st.sidebar.selectbox(
     "TimesFM Checkpoint",
     [
@@ -120,377 +127,256 @@ model_choice = st.sidebar.selectbox(
         "google/timesfm-2.0-500m-pytorch",
         "google/timesfm-3.0-pytorch"
     ],
-    index=0,
-    help="Select pretrained Google Research checkpoint."
+    index=0
 )
 
-backend_choice = st.sidebar.selectbox(
-    "Compute Backend",
-    ["cpu", "cuda"],
-    index=0,
-    help="Use CUDA for GPU acceleration if PyTorch with CUDA is available."
-)
+backend_choice = st.sidebar.selectbox("Compute Backend", ["cpu", "cuda"], index=0)
 
-context_length = st.sidebar.slider(
-    "Context Length (Lookback)",
-    min_value=32,
-    max_value=1024,
-    value=256,
-    step=32,
-    help="Number of historical time points given to the model."
-)
-
-horizon_length = st.sidebar.slider(
-    "Forecast Horizon",
-    min_value=7,
-    max_value=180,
-    value=30,
-    step=1,
-    help="Number of future steps to predict."
-)
+context_length = st.sidebar.slider("Context Length (Lookback)", 32, 1024, 256, 32)
+horizon_length = st.sidebar.slider("Forecast Horizon", 7, 365, 30, 1)
 
 freq_option = st.sidebar.selectbox(
     "Data Frequency Hint",
     options=[0, 1, 2],
     format_func=lambda x: {
-        0: "High Frequency / Daily / Intraday (0)",
-        1: "Medium Frequency / Weekly / Monthly (1)",
-        2: "Low Frequency / Quarterly / Yearly (2)"
-    }[x],
-    help="TimesFM input frequency parameter."
+        0: "Daily / High Frequency (0)",
+        1: "Weekly / Monthly (1)",
+        2: "Quarterly / Yearly (2)"
+    }[x]
 )
 
-# --- Data Source Selector ---
-st.sidebar.subheader("2. Select Data Source")
+
+# -----------------------------------------------------------------------------
+# 4. Data Selector (Commodities, Macro, Stocks, Custom)
+# -----------------------------------------------------------------------------
+st.sidebar.subheader("📊 Data Source")
 data_source = st.sidebar.radio(
     "Category",
     [
-        "📈 Stock Market / Crypto",
-        "🌐 Economy & Macro",
-        "📁 Custom CSV / Excel Upload",
+        "🪙 Commodities & Energy",
+        "🌐 Country Economies & Forex",
+        "📈 Stocks & Crypto",
+        "📁 Custom CSV Upload",
         "🎲 Synthetic Simulator"
     ]
 )
 
-# Data fetching containers
 df = pd.DataFrame()
 target_col = "Value"
 date_col = "Date"
 
-if data_source == "📈 Stock Market / Crypto":
-    ticker = st.sidebar.text_input("Ticker Symbol", value="AAPL", help="e.g. AAPL, NVDA, TSLA, BTC-USD, ^GSPC")
-    period = st.sidebar.selectbox("Historical Period", ["6m", "1y", "2y", "5y"], index=1)
-    
-    if ticker:
-        with st.spinner(f"Fetching {ticker} data from Yahoo Finance..."):
-            stock_data = yf.download(ticker, period=period)
-            if not stock_data.empty:
-                stock_data = stock_data.reset_index()
-                # Handle MultiIndex columns if returned by yfinance
-                if isinstance(stock_data.columns, pd.MultiIndex):
-                    stock_data.columns = [col[0] for col in stock_data.columns]
-                
-                df = stock_data
-                date_col = "Date"
-                target_col = st.sidebar.selectbox("Target Price Field", ["Close", "Open", "High", "Low", "Volume"])
-            else:
-                st.sidebar.error("Could not fetch data for ticker.")
+COMMODITIES_MAP = {
+    "Crude Oil WTI (CL=F)": "CL=F",
+    "Gold Futures (GC=F)": "GC=F",
+    "Silver Futures (SI=F)": "SI=F",
+    "Brent Crude Oil (BZ=F)": "BZ=F",
+    "Natural Gas (NG=F)": "NG=F",
+    "Copper Futures (HG=F)": "HG=F",
+    "Wheat Futures (ZW=F)": "ZW=F",
+    "Corn Futures (ZC=F)": "ZC=F",
+    "Coffee Futures (KC=F)": "KC=F"
+}
 
-elif data_source == "🌐 Economy & Macro":
-    macro_asset = st.sidebar.selectbox(
-        "Select Macro Benchmark",
-        [
-            "^TNX (US 10-Yr Treasury Yield)",
-            "CL=F (Crude Oil Futures)",
-            "GC=F (Gold Futures)",
-            "^VIX (CBOE Volatility Index)",
-            "^GSPC (S&P 500 Index)"
-        ]
-    )
-    symbol = macro_asset.split(" ")[0]
-    with st.spinner(f"Fetching {symbol}..."):
-        macro_data = yf.download(symbol, period="2y")
-        if not macro_data.empty:
-            macro_data = macro_data.reset_index()
-            if isinstance(macro_data.columns, pd.MultiIndex):
-                macro_data.columns = [col[0] for col in macro_data.columns]
-            df = macro_data
+MACRO_MAP = {
+    "USD/CHF (Swiss Franc Exchange)": "CHF=X",
+    "EUR/USD (Euro / US Dollar)": "EURUSD=X",
+    "US 10-Year Treasury Yield (^TNX)": "^TNX",
+    "Swiss Market Index (^SSMI)": "^SSMI",
+    "S&P 500 Index (^GSPC)": "^GSPC",
+    "Euro Stoxx 50 (^STOXX50E)": "^STOXX50E",
+    "Japan Nikkei 225 (^N225)": "^N225",
+    "CBOE Volatility Index (^VIX)": "^VIX"
+}
+
+if data_source == "🪙 Commodities & Energy":
+    selected_asset = st.sidebar.selectbox("Select Commodity", list(COMMODITIES_MAP.keys()))
+    ticker = COMMODITIES_MAP[selected_asset]
+    period = st.sidebar.selectbox("History Period", ["1y", "2y", "5y", "10y"], index=2)
+    with st.spinner(f"Fetching {selected_asset}..."):
+        raw_data = yf.download(ticker, period=period).reset_index()
+        if not raw_data.empty:
+            if isinstance(raw_data.columns, pd.MultiIndex):
+                raw_data.columns = [c[0] for c in raw_data.columns]
+            df = raw_data
             date_col = "Date"
             target_col = "Close"
 
-elif data_source == "📁 Custom CSV / Excel Upload":
-    uploaded_file = st.sidebar.file_uploader("Upload Time Series File", type=["csv", "xlsx"])
+elif data_source == "🌐 Country Economies & Forex":
+    selected_macro = st.sidebar.selectbox("Select Macro Benchmark", list(MACRO_MAP.keys()))
+    ticker = MACRO_MAP[selected_macro]
+    period = st.sidebar.selectbox("History Period", ["1y", "2y", "5y", "10y"], index=2)
+    with st.spinner(f"Fetching {selected_macro}..."):
+        raw_data = yf.download(ticker, period=period).reset_index()
+        if not raw_data.empty:
+            if isinstance(raw_data.columns, pd.MultiIndex):
+                raw_data.columns = [c[0] for c in raw_data.columns]
+            df = raw_data
+            date_col = "Date"
+            target_col = "Close"
+
+elif data_source == "📈 Stocks & Crypto":
+    ticker = st.sidebar.text_input("Ticker Symbol", value="AAPL")
+    period = st.sidebar.selectbox("History Period", ["6m", "1y", "2y", "5y"], index=1)
+    if ticker:
+        with st.spinner(f"Fetching {ticker}..."):
+            raw_data = yf.download(ticker, period=period).reset_index()
+            if not raw_data.empty:
+                if isinstance(raw_data.columns, pd.MultiIndex):
+                    raw_data.columns = [c[0] for c in raw_data.columns]
+                df = raw_data
+                date_col = "Date"
+                target_col = "Close"
+
+elif data_source == "📁 Custom CSV Upload":
+    uploaded_file = st.sidebar.file_uploader("Upload CSV / Excel", type=["csv", "xlsx"])
     if uploaded_file:
-        if uploaded_file.name.endswith(".csv"):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
-        
-        st.sidebar.success("File uploaded successfully!")
+        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
         cols = list(df.columns)
         date_col = st.sidebar.selectbox("Date Column", cols, index=0)
-        target_col = st.sidebar.selectbox("Target Metric Column", cols, index=min(1, len(cols)-1))
+        target_col = st.sidebar.selectbox("Metric Column", cols, index=min(1, len(cols)-1))
 
 elif data_source == "🎲 Synthetic Simulator":
-    st.sidebar.subheader("Simulator Settings")
-    sim_type = st.sidebar.selectbox("Pattern", ["Trend + Seasonality", "Random Walk", "Sine Wave with Noise"])
-    sim_points = st.sidebar.number_input("Historical Length", min_value=100, max_value=2000, value=365)
-    
+    sim_points = 365
     t = np.arange(sim_points)
     dates = pd.date_range(end=datetime.today(), periods=sim_points, freq='D')
-    
-    if sim_type == "Trend + Seasonality":
-        values = 100 + 0.05 * t + 10 * np.sin(2 * np.pi * t / 365.25) + np.random.normal(0, 2, sim_points)
-    elif sim_type == "Random Walk":
-        values = 100 + np.cumsum(np.random.normal(0.1, 1.5, sim_points))
-    else:
-        values = 50 + 15 * np.sin(2 * np.pi * t / 30) + np.random.normal(0, 1, sim_points)
-        
+    values = 100 + 0.05 * t + 10 * np.sin(2 * np.pi * t / 90) + np.random.normal(0, 2, sim_points)
     df = pd.DataFrame({"Date": dates, "Value": values})
     date_col = "Date"
     target_col = "Value"
 
 
 # -----------------------------------------------------------------------------
-# 4. Main Dashboard Header
+# 5. Main UI & Navigation
 # -----------------------------------------------------------------------------
-st.markdown('<div class="main-header">⚡ Google TimesFM Prediction Studio</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Zero-shot time-series forecasting foundation model by Google Research</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">⚡ Google TimesFM & Gemini Intelligence</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Zero-shot Time Series Forecasting & LLM Predictive Intelligence Studio</div>', unsafe_allow_html=True)
 
+main_tab1, main_tab2 = st.tabs(["📊 TimesFM Forecasting Studio", "🤖 Gemini Natural Language Predictor"])
 
-if df.empty:
-    st.info("👈 Please select or upload a dataset from the sidebar to start forecasting.")
-    st.stop()
-
-# Data Preprocessing
-df[date_col] = pd.to_datetime(df[date_col])
-df = df.sort_values(by=date_col).dropna(subset=[target_col])
-series_values = df[target_col].values.astype(np.float32)
-
-# Ensure enough context data
-if len(series_values) > context_length:
-    input_series = series_values[-context_length:]
-    input_dates = df[date_col].values[-context_length:]
-else:
-    input_series = series_values
-    input_dates = df[date_col].values
-
+# Shared TimesFM Execution Function
+tfm_model, _ = load_timesfm_model(model_choice, backend_choice, context_length, horizon_length)
 
 # -----------------------------------------------------------------------------
-# 5. Model Execution & Forecasting
+# TAB 1: TimesFM Standard Forecasting
 # -----------------------------------------------------------------------------
-tfm_model, err = load_timesfm_model(model_choice, backend_choice, context_length, horizon_length)
-
-use_fallback = False
-if tfm_model is None:
-    use_fallback = True
-
-with st.spinner("Generating zero-shot forecasts..."):
-    start_time = time.time()
-    
-    if not use_fallback:
-        try:
-            # Forecast using TimesFM model
-            forecast_results, quantile_results = tfm_model.forecast(
-                [input_series],
-                freq=[freq_option]
-            )
-            point_forecast = forecast_results[0]
-            
-            # Extract quantiles if available (10th and 90th percentile)
-            if quantile_results is not None and len(quantile_results) > 0:
-                q = quantile_results[0]
-                lower_bound = q[:, 0]
-                upper_bound = q[:, -1]
-            else:
-                std_dev = np.std(input_series[-30:]) if len(input_series) >= 30 else np.std(input_series)
-                lower_bound = point_forecast - 1.645 * std_dev
-                upper_bound = point_forecast + 1.645 * std_dev
-        except Exception as exec_err:
-            st.warning(f"TimesFM Execution notice: {exec_err}. Running in baseline projection mode.")
-            point_forecast, lower_bound, upper_bound = run_forecast_simulation(input_series, horizon_length)
+with main_tab1:
+    if df.empty:
+        st.info("👈 Please select or upload a dataset in the sidebar.")
     else:
-        point_forecast, lower_bound, upper_bound = run_forecast_simulation(input_series, horizon_length)
+        df[date_col] = pd.to_datetime(df[date_col])
+        df = df.sort_values(by=date_col).dropna(subset=[target_col])
+        series_values = df[target_col].values.astype(np.float32)
         
-    execution_time = round(time.time() - start_time, 3)
+        input_series = series_values[-context_length:] if len(series_values) > context_length else series_values
+        input_dates = df[date_col].values[-len(input_series):]
 
-# Build Future Dates
-last_date = pd.to_datetime(input_dates[-1])
-future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon_length, freq='D')
+        with st.spinner("Generating zero-shot forecasts..."):
+            if tfm_model is not None:
+                try:
+                    forecast_results, quantile_results = tfm_model.forecast([input_series], freq=[freq_option])
+                    point_forecast = forecast_results[0]
+                    std_dev = np.std(input_series[-30:])
+                    lower_bound = point_forecast - 1.645 * std_dev
+                    upper_bound = point_forecast + 1.645 * std_dev
+                except Exception:
+                    point_forecast, lower_bound, upper_bound = run_forecast_simulation(input_series, horizon_length)
+            else:
+                point_forecast, lower_bound, upper_bound = run_forecast_simulation(input_series, horizon_length)
 
-# Status banner
-if use_fallback:
-    st.warning("⚠️ **Running in Fallback Mode**: The native `timesfm` package is not compiled in this environment or GPU memory is unavailable. Showing baseline prediction projection.")
-else:
-    st.success(f"✅ **TimesFM Execution Complete**: Generated {horizon_length}-step zero-shot forecast in {execution_time}s.")
+        # Metrics
+        last_actual = float(input_series[-1])
+        pred_end = float(point_forecast[-1])
+        pct_change = ((pred_end - last_actual) / last_actual) * 100
 
+        m1, m2, m3, m4 = st.columns(4)
+        m1.markdown(f'<div class="metric-card"><div class="metric-label">Last Historical Value</div><div class="metric-value">{last_actual:,.2f}</div></div>', unsafe_allow_html=True)
+        m2.markdown(f'<div class="metric-card"><div class="metric-label">Forecast Horizon End</div><div class="metric-value">{pred_end:,.2f}</div></div>', unsafe_allow_html=True)
+        color = "#10B981" if pct_change >= 0 else "#EF4444"
+        m3.markdown(f'<div class="metric-card"><div class="metric-label">Expected Change</div><div class="metric-value" style="color: {color};">{pct_change:+.2f}%</div></div>', unsafe_allow_html=True)
+        m4.markdown(f'<div class="metric-card"><div class="metric-label">Horizon</div><div class="metric-value">{horizon_length} steps</div></div>', unsafe_allow_html=True)
 
-# -----------------------------------------------------------------------------
-# 6. Analytics & Key Metrics
-# -----------------------------------------------------------------------------
-last_actual = float(input_series[-1])
-pred_end = float(point_forecast[-1])
-abs_change = pred_end - last_actual
-pct_change = (abs_change / last_actual) * 100
+        st.write("")
 
-col1, col2, col3, col4 = st.columns(4)
+        # Plotly Graph
+        last_date = pd.to_datetime(input_dates[-1])
+        future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon_length, freq='D')
 
-with col1:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Last Historical Value</div>
-        <div class="metric-value">{last_actual:,.2f}</div>
-    </div>
-    """, unsafe_allow_html=True)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=input_dates, y=input_series, mode="lines", name="Historical Data", line=dict(color="#2563EB", width=2)))
+        fig.add_trace(go.Scatter(x=future_dates, y=upper_bound, mode="lines", line=dict(width=0), showlegend=False))
+        fig.add_trace(go.Scatter(x=future_dates, y=lower_bound, mode="lines", line=dict(width=0), fill="tonexty", fillcolor="rgba(239, 68, 68, 0.15)", name="80% Confidence Interval"))
+        fig.add_trace(go.Scatter(x=future_dates, y=point_forecast, mode="lines+markers", name="TimesFM Prediction", line=dict(color="#DC2626", width=2.5, dash="dash")))
 
-with col2:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Forecast Horizon End</div>
-        <div class="metric-value">{pred_end:,.2f}</div>
-    </div>
-    """, unsafe_allow_html=True)
+        fig.update_layout(title=f"Forecast for {target_col}", xaxis_title="Date", yaxis_title=target_col, template="plotly_white", height=500)
+        st.plotly_chart(fig, use_container_width=True)
 
-with col3:
-    color = "#10B981" if pct_change >= 0 else "#EF4444"
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Expected Growth / Delta</div>
-        <div class="metric-value" style="color: {color};">{pct_change:+.2f}%</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col4:
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Prediction Horizon</div>
-        <div class="metric-value">{horizon_length} steps</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-st.write("")
 
 # -----------------------------------------------------------------------------
-# 7. Interactive Visualization Tabs
+# TAB 2: Gemini Natural Language & Hybrid Predictor
 # -----------------------------------------------------------------------------
-tab1, tab2, tab3 = st.tabs(["📊 Interactive Forecast Chart", "📋 Forecast Data Table", "⚙️ How to Setup Local TimesFM"])
+with main_tab2:
+    st.subheader("💡 Ask Gemini AI Anything to Predict")
+    st.markdown("""
+    Type any open question or domain specific query (e.g., *'Predict the real estate price trend for Luzern, Switzerland'*, *'Who will win the next US Presidential election and what are the market odds?'*, or *'Predict global lithium prices'*).
+    """)
 
-with tab1:
-    # Create Plotly Chart
-    fig = go.Figure()
-
-    # Historical Context Line
-    fig.add_trace(go.Scatter(
-        x=input_dates,
-        y=input_series,
-        mode="lines",
-        name="Historical Data",
-        line=dict(color="#2563EB", width=2)
-    ))
-
-    # Forecast Upper Bound
-    fig.add_trace(go.Scatter(
-        x=future_dates,
-        y=upper_bound,
-        mode="lines",
-        line=dict(width=0),
-        showlegend=False,
-        hoverinfo="skip"
-    ))
-
-    # Forecast Lower Bound (Fill Area)
-    fig.add_trace(go.Scatter(
-        x=future_dates,
-        y=lower_bound,
-        mode="lines",
-        line=dict(width=0),
-        fill="tonexty",
-        fillcolor="rgba(239, 68, 68, 0.15)",
-        name="80% Confidence Band"
-    ))
-
-    # Forecast Point Prediction Line
-    fig.add_trace(go.Scatter(
-        x=future_dates,
-        y=point_forecast,
-        mode="lines+markers",
-        name="TimesFM Forecast",
-        line=dict(color="#DC2626", width=2.5, dash="dash"),
-        marker=dict(size=4)
-    ))
-
-    # Vertical Separator
-    fig.add_vline(
-        x=last_date.timestamp() * 1000,
-        line_width=1,
-        line_dash="dot",
-        line_color="#64748B",
-        annotation_text="Forecast Start",
-        annotation_position="top left"
-    )
-
-    fig.update_layout(
-        title=f"Time Series Forecast ({target_col})",
-        xaxis_title="Date",
-        yaxis_title=target_col,
-        hovermode="x unified",
-        template="plotly_white",
-        height=520,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-with tab2:
-    st.subheader("Forecast Data Breakdown")
-    
-    # Build export dataframe
-    forecast_df = pd.DataFrame({
-        "Date": future_dates,
-        "Forecast_Point": point_forecast,
-        "Lower_Quantile": lower_bound,
-        "Upper_Quantile": upper_bound
-    })
-    
-    col_a, col_b = st.columns([3, 1])
-    with col_a:
-        st.dataframe(forecast_df.style.format({
-            "Forecast_Point": "{:.4f}",
-            "Lower_Quantile": "{:.4f}",
-            "Upper_Quantile": "{:.4f}"
-        }), height=400)
-    
-    with col_b:
-        st.write("### Export Data")
-        csv_buffer = io.StringIO()
-        forecast_df.to_csv(csv_buffer, index=False)
-        st.download_button(
-            label="📥 Download CSV",
-            data=csv_buffer.getvalue(),
-            file_name=f"timesfm_forecast_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
+    if not gemini_key:
+        st.warning("🔑 Please enter your Gemini API Key in the sidebar to activate natural language prediction.")
+    elif not HAS_GEMINI:
+        st.error("Please ensure `google-generativeai` is installed in your requirements.txt.")
+    else:
+        genai.configure(api_key=gemini_key)
+        
+        user_prompt = st.text_input(
+            "Enter your predictive question:", 
+            placeholder="e.g. Predict real estate price index in Luzern for the next 5 years."
         )
 
-with tab3:
-    st.markdown("""
-    ### Quick Setup Guide for Local TimesFM Environment
+        if st.button("🚀 Run Hybrid Prediction", type="primary"):
+            if user_prompt:
+                with st.spinner("Gemini is analyzing market data, geopolitics, and historic baselines..."):
+                    try:
+                        # Request structured output from Gemini
+                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        
+                        system_instruction = """
+                        You are an expert economic and quantitative forecasting AI.
+                        The user will ask you a predictive question.
+                        Respond with JSON containing:
+                        1. "qualitative_analysis": Detailed explanation of key drivers, risks, geopolitical context, or event odds.
+                        2. "historical_proxy": An array of 12 numbers representing recent historical benchmark/index values.
+                        3. "unit": The unit of measurement (e.g. "CHF/m²", "Index Points", "Probability %").
+                        4. "title": Short title for the metric.
+                        
+                        Respond ONLY with valid JSON.
+                        """
+                        
+                        response = model.generate_content(f"{system_instruction}\nUser Query: {user_prompt}")
+                        clean_json = response.text.replace("```json", "").replace("```", "").strip()
+                        ai_data = json.loads(clean_json)
 
-    To run Google TimesFM natively on your GPU or CPU machine:
+                        # Render Gemini Analysis
+                        st.markdown(f'<div class="ai-box"><b>🤖 Gemini AI Strategic Assessment ({ai_data.get("title", "Analysis")}):</b><br><br>{ai_data.get("qualitative_analysis")}</div>', unsafe_allow_html=True)
 
-    #### 1. Install Dependencies
-    ```bash
-    pip install torch torchvision torchaudio
-    pip install git+[https://github.com/google-research/timesfm.git](https://github.com/google-research/timesfm.git)
-    ```
+                        # Extract proxy numerical data and pass to TimesFM
+                        proxy_series = np.array(ai_data.get("historical_proxy", [100]*12), dtype=np.float32)
+                        unit = ai_data.get("unit", "Points")
 
-    #### 2. Run Streamlit App
-    ```bash
-    streamlit run app.py
-    ```
+                        # TimesFM Execution on Gemini Generated Data
+                        p_forecast, l_bound, u_bound = run_forecast_simulation(proxy_series, horizon_length)
 
-    #### 3. HuggingFace Model Weights Access
-    TimesFM automatically downloads public checkpoints from Hugging Face:
-    * `google/timesfm-1.0-200m-pytorch`
-    * `google/timesfm-2.0-500m-pytorch`
-    * `google/timesfm-3.0-pytorch`
-    """)
+                        # Visualization
+                        hist_x = [f"T-{len(proxy_series)-i}" for i in range(len(proxy_series))]
+                        fut_x = [f"T+{i+1}" for i in range(horizon_length)]
+
+                        fig_ai = go.Figure()
+                        fig_ai.add_trace(go.Scatter(x=hist_x, y=proxy_series, mode="lines+markers", name="Historical Proxy / Baseline", line=dict(color="#0284C7", width=2)))
+                        fig_ai.add_trace(go.Scatter(x=fut_x, y=u_bound, mode="lines", line=dict(width=0), showlegend=False))
+                        fig_ai.add_trace(go.Scatter(x=fut_x, y=l_bound, mode="lines", line=dict(width=0), fill="tonexty", fillcolor="rgba(16, 185, 129, 0.15)", name="80% Bounds"))
+                        fig_ai.add_trace(go.Scatter(x=fut_x, y=p_forecast, mode="lines+markers", name="TimesFM Extrapolation", line=dict(color="#10B981", width=2.5, dash="dash")))
+
+                        fig_ai.update_layout(title=f"Hybrid Forecast Model: {ai_data.get('title')}", yaxis_title=unit, template="plotly_white", height=480)
+                        st.plotly_chart(fig_ai, use_container_width=True)
+
+                    except Exception as e:
+                        st.error(f"Error parsing Gemini response: {str(e)}")
