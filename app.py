@@ -8,6 +8,7 @@ import io
 import time
 import json
 import os
+import re
 
 # Gemini API import check
 try:
@@ -105,35 +106,50 @@ def run_forecast_simulation(data_series, horizon_len):
     return simulated_point, lower_bound, upper_bound
 
 
-def get_active_gemini_model():
-    """
-    Dynamically queries Google Generative AI API for active models available to this key
-    to prevent 404 alias errors.
-    """
-    try:
-        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        # Priority preferences for model selection
-        preferences = [
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-flash-latest",
-            "gemini-1.5-flash",
-            "gemini-2.5-pro",
-            "gemini-1.5-pro",
-        ]
-        
-        for pref in preferences:
-            for m in models:
-                if pref in m:
-                    return m
-        
-        if models:
-            return models[0]
-    except Exception:
-        pass
+# Robust multi-model Gemini execution engine
+def call_gemini_with_fallback(system_instruction, user_prompt):
+    candidate_models = [
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-2.0-flash",
+        "gemini-flash-latest",
+        "gemini-pro"
+    ]
     
-    return "gemini-flash-latest"
+    # Try fetching dynamically active models
+    try:
+        active_from_api = [m.name.replace("models/", "") for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+    except Exception:
+        active_from_api = []
+
+    # Merge candidates without duplicates
+    all_candidates = []
+    for model in active_from_api + candidate_models:
+        clean = model.replace("models/", "")
+        if clean not in all_candidates and "2.5" not in clean:  # Exclude retired 2.5 aliases
+            all_candidates.append(clean)
+
+    last_err = None
+    for model_name in all_candidates:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(f"{system_instruction}\nUser Query: {user_prompt}")
+            if response and response.text:
+                return response.text, model_name
+        except Exception as e:
+            last_err = e
+            continue
+
+    raise last_err or Exception("Could not find an active Gemini model for this API key.")
+
+
+def parse_gemini_json(text):
+    text = text.replace("```json", "").replace("```", "").strip()
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end != -1:
+        text = text[start:end+1]
+    return json.loads(text)
 
 
 # -----------------------------------------------------------------------------
@@ -337,7 +353,7 @@ with main_tab1:
 
 
 # -----------------------------------------------------------------------------
-# TAB 2: Gemini Natural Language Predictor with Dynamic Model Resolver
+# TAB 2: Gemini Natural Language Predictor with Automatic Model Retry
 # -----------------------------------------------------------------------------
 with main_tab2:
     st.subheader("💡 Ask Gemini AI Anything to Predict")
@@ -359,29 +375,24 @@ with main_tab2:
 
         if st.button("🚀 Run Hybrid Prediction", type="primary"):
             if user_prompt:
-                with st.spinner("Resolving available Gemini model and analyzing market context..."):
+                with st.spinner("Analyzing query and establishing predictive baseline..."):
                     try:
-                        # Auto-detect supported active model for this API key
-                        active_model_name = get_active_gemini_model()
-                        model = genai.GenerativeModel(active_model_name)
-
                         system_instruction = """
                         You are an expert economic and quantitative forecasting AI.
                         The user will ask you a predictive question.
-                        Respond strictly with JSON containing:
+                        Respond strictly with valid JSON containing:
                         1. "qualitative_analysis": Detailed explanation of key drivers, risks, geopolitical context, or event odds.
                         2. "historical_proxy": An array of 12 numbers representing recent historical benchmark/index values.
                         3. "unit": The unit of measurement (e.g. "CHF/m²", "Index Points", "Probability %").
                         4. "title": Short title for the metric.
                         
-                        Respond ONLY with valid JSON string. Do not add formatting markdown outside JSON.
+                        Respond ONLY with valid JSON.
                         """
                         
-                        response = model.generate_content(f"{system_instruction}\nUser Query: {user_prompt}")
-                        clean_json = response.text.replace("```json", "").replace("```", "").strip()
-                        ai_data = json.loads(clean_json)
+                        raw_response, active_model_used = call_gemini_with_fallback(system_instruction, user_prompt)
+                        ai_data = parse_gemini_json(raw_response)
 
-                        st.markdown(f'<div class="ai-box"><b>🤖 Gemini AI Strategic Assessment ({ai_data.get("title", "Analysis")}) [Model: {active_model_name}]:</b><br><br>{ai_data.get("qualitative_analysis")}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="ai-box"><b>🤖 Gemini AI Assessment ({ai_data.get("title", "Analysis")}) [Model: {active_model_used}]:</b><br><br>{ai_data.get("qualitative_analysis")}</div>', unsafe_allow_html=True)
 
                         proxy_series = np.array(ai_data.get("historical_proxy", [100]*12), dtype=np.float32)
                         unit = ai_data.get("unit", "Points")
