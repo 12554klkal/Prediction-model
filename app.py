@@ -4,8 +4,6 @@ import numpy as np
 import plotly.graph_objects as go
 import yfinance as yf
 from datetime import datetime, timedelta
-import io
-import time
 import json
 import os
 
@@ -17,10 +15,10 @@ except ImportError:
     HAS_GEMINI = False
 
 # -----------------------------------------------------------------------------
-# 1. Page Configuration & Custom Styling
+# 1. Page Configuration & Apple Design System (CSS)
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="TimesFM & Gemini Predictive Intelligence Studio",
+    page_title="TimesFM & Gemini Predictive Studio",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -28,46 +26,103 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 2.2rem;
+    /* Global Apple Font & Clean Background */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", Roboto, sans-serif;
+        color: #1D1D1F;
+    }
+    
+    .stApp {
+        background-color: #F5F5F7;
+    }
+    
+    /* Title Styles */
+    .apple-header {
+        font-size: 2.3rem;
         font-weight: 700;
-        color: #0F172A;
+        letter-spacing: -0.02em;
+        color: #1D1D1F;
         margin-bottom: 0.2rem;
     }
-    .sub-header {
-        font-size: 1.0rem;
-        color: #64748B;
-        margin-bottom: 1.5rem;
+    
+    .apple-subheader {
+        font-size: 1.05rem;
+        font-weight: 400;
+        color: #86868B;
+        margin-bottom: 1.8rem;
     }
-    .metric-card {
-        background-color: #F8FAFC;
-        border: 1px solid #E2E8F0;
-        border-radius: 10px;
-        padding: 15px;
-        text-align: center;
-    }
-    .metric-value {
-        font-size: 1.6rem;
-        font-weight: bold;
-        color: #0F172A;
-    }
-    .metric-label {
-        font-size: 0.85rem;
-        color: #64748B;
-    }
-    .ai-box {
-        background-color: #F0F9FF;
-        border-left: 4px solid #0284C7;
-        padding: 15px;
-        border-radius: 6px;
+    
+    /* Apple Minimal Card Styling */
+    .apple-card {
+        background: #FFFFFF;
+        border-radius: 16px;
+        padding: 20px 24px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+        border: 1px solid rgba(0, 0, 0, 0.06);
         margin-bottom: 20px;
+        transition: all 0.2s ease;
+    }
+    
+    .apple-card:hover {
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.07);
+    }
+    
+    .apple-metric-label {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #86868B;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+    
+    .apple-metric-val {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #1D1D1F;
+        margin-top: 4px;
+        letter-spacing: -0.02em;
+    }
+    
+    .apple-metric-sub {
+        font-size: 0.85rem;
+        margin-top: 4px;
+        font-weight: 500;
+    }
+
+    /* AI Box Glassmorphic Styling */
+    .ai-insight-card {
+        background: rgba(255, 255, 255, 0.85);
+        backdrop-filter: blur(12px);
+        border-radius: 16px;
+        padding: 24px;
+        border: 1px solid rgba(0, 113, 227, 0.2);
+        box-shadow: 0 4px 24px rgba(0, 113, 227, 0.06);
+        margin-bottom: 24px;
+    }
+
+    .ai-insight-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #0071E3;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+
+    .ai-insight-body {
+        font-size: 0.95rem;
+        line-height: 1.6;
+        color: #333336;
     }
 </style>
 """, unsafe_allow_html=True)
 
 
 # -----------------------------------------------------------------------------
-# 2. TimesFM Model Loader & Simulation Engine
+# 2. TimesFM & Gemini Engines
 # -----------------------------------------------------------------------------
 @st.cache_resource(show_spinner="Loading Google TimesFM Model Weights...")
 def load_timesfm_model(model_name, backend, context_len, horizon_len):
@@ -90,7 +145,7 @@ def load_timesfm_model(model_name, backend, context_len, horizon_len):
 
 
 def run_forecast_simulation(data_series, horizon_len):
-    last_val = data_series[-1]
+    last_val = float(data_series[-1])
     returns = np.diff(data_series[-30:]) / data_series[-30:-1] if len(data_series) > 30 else np.diff(data_series) / data_series[:-1]
     avg_return = np.mean(returns) if len(returns) > 0 else 0.001
     volatility = np.std(returns) if len(returns) > 0 else 0.01
@@ -149,55 +204,44 @@ def parse_gemini_json(text):
 
 
 # -----------------------------------------------------------------------------
-# 3. Sidebar Controls
+# 3. Sidebar (Simplified & Intuitive Controls)
 # -----------------------------------------------------------------------------
-st.sidebar.title("⚙️ Engine Controls")
+st.sidebar.markdown("### ⚙️ Workspace Setup")
 
-st.sidebar.subheader("🔑 Gemini AI Integration")
-gemini_key = st.sidebar.text_input(
-    "Gemini API Key", 
-    type="password", 
-    value=os.environ.get("GEMINI_API_KEY", ""),
-    help="Enter your Google Gemini API key."
-)
+# Gemini API Key section
+with st.sidebar.expander("🔑 Gemini AI Connection", expanded=True):
+    gemini_key = st.text_input(
+        "API Key", 
+        type="password", 
+        value=os.environ.get("GEMINI_API_KEY", ""),
+        help="Paste your Google Gemini API key to enable AI queries."
+    )
 
-st.sidebar.subheader("🤖 TimesFM Model Settings")
-model_choice = st.sidebar.selectbox(
-    "TimesFM Checkpoint",
-    [
-        "google/timesfm-1.0-200m-pytorch",
-        "google/timesfm-2.0-500m-pytorch",
-        "google/timesfm-3.0-pytorch"
-    ],
-    index=0
-)
+# Model configuration in simple plain English
+with st.sidebar.expander("🤖 Forecasting Engine Settings", expanded=False):
+    model_choice = st.selectbox(
+        "TimesFM Model Version",
+        [
+            "google/timesfm-1.0-200m-pytorch",
+            "google/timesfm-2.0-500m-pytorch",
+            "google/timesfm-3.0-pytorch"
+        ],
+        index=0
+    )
+    backend_choice = st.selectbox("Compute Engine", ["cpu", "cuda"], index=0)
+    context_length = st.slider("Past History Window (Days)", 32, 500, 256, 32, help="How many past data points TimesFM reads to understand trends.")
+    horizon_length = st.slider("Future Forecast Distance (Days/Steps)", 7, 365, 60, 1, help="How far into the future you want to project.")
 
-backend_choice = st.sidebar.selectbox("Compute Backend", ["cpu", "cuda"], index=0)
-context_length = st.sidebar.slider("Context Length (Lookback)", 32, 1024, 256, 32)
-horizon_length = st.sidebar.slider("Forecast Horizon", 7, 365, 30, 1)
-
-freq_option = st.sidebar.selectbox(
-    "Data Frequency Hint",
-    options=[0, 1, 2],
-    format_func=lambda x: {
-        0: "Daily / High Frequency (0)",
-        1: "Weekly / Monthly (1)",
-        2: "Quarterly / Yearly (2)"
-    }[x]
-)
-
-# -----------------------------------------------------------------------------
-# 4. Data Selector (Commodities, Macro, Stocks, Custom)
-# -----------------------------------------------------------------------------
-st.sidebar.subheader("📊 Data Source")
+# Data Selector Section
+st.sidebar.markdown("### 📊 Choose Market Data")
 data_source = st.sidebar.radio(
-    "Category",
+    "Data Category",
     [
         "🪙 Commodities & Energy",
-        "🌐 Country Economies & Forex",
+        "🌐 Economies & Currencies",
         "📈 Stocks & Crypto",
-        "📁 Custom CSV Upload",
-        "🎲 Synthetic Simulator"
+        "📁 Upload CSV File",
+        "🎲 Demo Simulator"
     ]
 )
 
@@ -206,33 +250,29 @@ target_col = "Value"
 date_col = "Date"
 
 COMMODITIES_MAP = {
-    "Gold Futures (GC=F)": "GC=F",
-    "Crude Oil WTI (CL=F)": "CL=F",
-    "Silver Futures (SI=F)": "SI=F",
-    "Brent Crude Oil (BZ=F)": "BZ=F",
-    "Natural Gas (NG=F)": "NG=F",
-    "Copper Futures (HG=F)": "HG=F",
-    "Wheat Futures (ZW=F)": "ZW=F",
-    "Corn Futures (ZC=F)": "ZC=F",
-    "Coffee Futures (KC=F)": "KC=F"
+    "Gold Futures": "GC=F",
+    "Crude Oil WTI": "CL=F",
+    "Silver Futures": "SI=F",
+    "Brent Crude Oil": "BZ=F",
+    "Natural Gas": "NG=F",
+    "Copper Futures": "HG=F",
+    "Wheat Futures": "ZW=F"
 }
 
 MACRO_MAP = {
-    "USD/CHF (Swiss Franc Exchange)": "CHF=X",
-    "EUR/USD (Euro / US Dollar)": "EURUSD=X",
-    "US 10-Year Treasury Yield (^TNX)": "^TNX",
-    "Swiss Market Index (^SSMI)": "^SSMI",
-    "S&P 500 Index (^GSPC)": "^GSPC",
-    "Euro Stoxx 50 (^STOXX50E)": "^STOXX50E",
-    "Japan Nikkei 225 (^N225)": "^N225",
-    "CBOE Volatility Index (^VIX)": "^VIX"
+    "Swiss Franc (USD/CHF)": "CHF=X",
+    "Euro (EUR/USD)": "EURUSD=X",
+    "Swiss Market Index (SMI)": "^SSMI",
+    "S&P 500 Index": "^GSPC",
+    "US 10-Yr Treasury Yield": "^TNX",
+    "Volatility Index (VIX)": "^VIX"
 }
 
 if data_source == "🪙 Commodities & Energy":
-    selected_asset = st.sidebar.selectbox("Select Commodity", list(COMMODITIES_MAP.keys()))
+    selected_asset = st.sidebar.selectbox("Commodity", list(COMMODITIES_MAP.keys()))
     ticker = COMMODITIES_MAP[selected_asset]
-    period = st.sidebar.selectbox("History Period", ["1y", "2y", "5y", "10y"], index=2)
-    with st.spinner(f"Fetching {selected_asset}..."):
+    period = st.sidebar.selectbox("History Duration", ["1y", "2y", "5y", "10y"], index=2)
+    with st.spinner(f"Loading {selected_asset}..."):
         raw_data = yf.download(ticker, period=period).reset_index()
         if not raw_data.empty:
             if isinstance(raw_data.columns, pd.MultiIndex):
@@ -241,11 +281,11 @@ if data_source == "🪙 Commodities & Energy":
             date_col = "Date"
             target_col = "Close"
 
-elif data_source == "🌐 Country Economies & Forex":
-    selected_macro = st.sidebar.selectbox("Select Macro Benchmark", list(MACRO_MAP.keys()))
+elif data_source == "🌐 Economies & Currencies":
+    selected_macro = st.sidebar.selectbox("Economic Asset", list(MACRO_MAP.keys()))
     ticker = MACRO_MAP[selected_macro]
-    period = st.sidebar.selectbox("History Period", ["1y", "2y", "5y", "10y"], index=2)
-    with st.spinner(f"Fetching {selected_macro}..."):
+    period = st.sidebar.selectbox("History Duration", ["1y", "2y", "5y", "10y"], index=2)
+    with st.spinner(f"Loading {selected_macro}..."):
         raw_data = yf.download(ticker, period=period).reset_index()
         if not raw_data.empty:
             if isinstance(raw_data.columns, pd.MultiIndex):
@@ -255,10 +295,10 @@ elif data_source == "🌐 Country Economies & Forex":
             target_col = "Close"
 
 elif data_source == "📈 Stocks & Crypto":
-    ticker = st.sidebar.text_input("Ticker Symbol", value="AAPL")
-    period = st.sidebar.selectbox("History Period", ["6m", "1y", "2y", "5y"], index=1)
+    ticker = st.sidebar.text_input("Stock Ticker Symbol", value="AAPL")
+    period = st.sidebar.selectbox("History Duration", ["6m", "1y", "2y", "5y"], index=1)
     if ticker:
-        with st.spinner(f"Fetching {ticker}..."):
+        with st.spinner(f"Loading {ticker}..."):
             raw_data = yf.download(ticker, period=period).reset_index()
             if not raw_data.empty:
                 if isinstance(raw_data.columns, pd.MultiIndex):
@@ -267,52 +307,54 @@ elif data_source == "📈 Stocks & Crypto":
                 date_col = "Date"
                 target_col = "Close"
 
-elif data_source == "📁 Custom CSV Upload":
-    uploaded_file = st.sidebar.file_uploader("Upload CSV / Excel", type=["csv", "xlsx"])
+elif data_source == "📁 Upload CSV File":
+    uploaded_file = st.sidebar.file_uploader("Upload CSV / Excel File", type=["csv", "xlsx"])
     if uploaded_file:
         df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
         cols = list(df.columns)
         date_col = st.sidebar.selectbox("Date Column", cols, index=0)
-        target_col = st.sidebar.selectbox("Metric Column", cols, index=min(1, len(cols)-1))
+        target_col = st.sidebar.selectbox("Values Column", cols, index=min(1, len(cols)-1))
 
-elif data_source == "🎲 Synthetic Simulator":
-    sim_points = 365
+elif data_source == "🎲 Demo Simulator":
+    sim_points = 365 * 3
     t = np.arange(sim_points)
     dates = pd.date_range(end=datetime.today(), periods=sim_points, freq='D')
-    values = 100 + 0.05 * t + 10 * np.sin(2 * np.pi * t / 90) + np.random.normal(0, 2, sim_points)
+    values = 100 + 0.05 * t + 10 * np.sin(2 * np.pi * t / 90) + np.random.normal(0, 1.5, sim_points)
     df = pd.DataFrame({"Date": dates, "Value": values})
     date_col = "Date"
     target_col = "Value"
 
 
 # -----------------------------------------------------------------------------
-# 5. Main UI & Navigation
+# 4. Main Interface & Navigation
 # -----------------------------------------------------------------------------
-st.markdown('<div class="main-header">⚡ Google TimesFM & Gemini Intelligence</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Zero-shot Time Series Forecasting & LLM Predictive Intelligence Studio</div>', unsafe_allow_html=True)
+st.markdown('<div class="apple-header">Predictive Intelligence Studio</div>', unsafe_allow_html=True)
+st.markdown('<div class="apple-subheader">Seamless integration of Gemini AI contextual research with Google TimesFM forecasting engine.</div>', unsafe_allow_html=True)
 
-main_tab1, main_tab2 = st.tabs(["📊 TimesFM Standard Forecasting", "🤖 Gemini AI + TimesFM Pipeline"])
+main_tab1, main_tab2 = st.tabs(["📊 Standard Dataset Forecasting", "🤖 Gemini AI ➔ Google TimesFM Pipeline"])
 
 tfm_model, _ = load_timesfm_model(model_choice, backend_choice, context_length, horizon_length)
 
 # -----------------------------------------------------------------------------
-# TAB 1: TimesFM Standard Forecasting
+# TAB 1: Standard Interactive Dataset Forecasting
 # -----------------------------------------------------------------------------
 with main_tab1:
     if df.empty:
-        st.info("👈 Please select or upload a dataset in the sidebar.")
+        st.info("👈 Please select or upload a dataset in the left sidebar to begin.")
     else:
         df[date_col] = pd.to_datetime(df[date_col])
         df = df.sort_values(by=date_col).dropna(subset=[target_col])
+        
         series_values = df[target_col].values.astype(np.float32)
+        dates_array = df[date_col].values
         
         input_series = series_values[-context_length:] if len(series_values) > context_length else series_values
-        input_dates = df[date_col].values[-len(input_series):]
+        input_dates = dates_array[-len(input_series):]
 
-        with st.spinner("Generating zero-shot forecasts..."):
+        with st.spinner("Computing zero-shot forecast with TimesFM..."):
             if tfm_model is not None:
                 try:
-                    forecast_results, quantile_results = tfm_model.forecast([input_series], freq=[freq_option])
+                    forecast_results, _ = tfm_model.forecast([input_series], freq=[0])
                     point_forecast = forecast_results[0]
                     std_dev = np.std(input_series[-30:])
                     lower_bound = point_forecast - 1.645 * std_dev
@@ -326,135 +368,331 @@ with main_tab1:
         pred_end = float(point_forecast[-1])
         pct_change = ((pred_end - last_actual) / last_actual) * 100
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.markdown(f'<div class="metric-card"><div class="metric-label">Last Historical Value</div><div class="metric-value">{last_actual:,.2f}</div></div>', unsafe_allow_html=True)
-        m2.markdown(f'<div class="metric-card"><div class="metric-label">Forecast Horizon End</div><div class="metric-value">{pred_end:,.2f}</div></div>', unsafe_allow_html=True)
-        color = "#10B981" if pct_change >= 0 else "#EF4444"
-        m3.markdown(f'<div class="metric-card"><div class="metric-label">Expected Change</div><div class="metric-value" style="color: {color};">{pct_change:+.2f}%</div></div>', unsafe_allow_html=True)
-        m4.markdown(f'<div class="metric-card"><div class="metric-label">Horizon</div><div class="metric-value">{horizon_length} steps</div></div>', unsafe_allow_html=True)
-
-        st.write("")
-
         last_date = pd.to_datetime(input_dates[-1])
         future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon_length, freq='D')
+        forecast_end_date = future_dates[-1]
 
+        # Top Metric Cards (Apple Style)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.markdown(f'''
+        <div class="apple-card">
+            <div class="apple-metric-label">Current Value</div>
+            <div class="apple-metric-val">{last_actual:,.2f}</div>
+            <div class="apple-metric-sub" style="color: #86868B;">As of {last_date.strftime("%b %d, %Y")}</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
+        c2.markdown(f'''
+        <div class="apple-card">
+            <div class="apple-metric-label">Target Prediction</div>
+            <div class="apple-metric-val">{pred_end:,.2f}</div>
+            <div class="apple-metric-sub" style="color: #86868B;">For {forecast_end_date.strftime("%b %d, %Y")}</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
+        delta_color = "#10B981" if pct_change >= 0 else "#EF4444"
+        c3.markdown(f'''
+        <div class="apple-card">
+            <div class="apple-metric-label">Expected Growth</div>
+            <div class="apple-metric-val" style="color: {delta_color};">{pct_change:+.2f}%</div>
+            <div class="apple-metric-sub" style="color: {delta_color};">Net projected shift</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
+        c4.markdown(f'''
+        <div class="apple-card">
+            <div class="apple-metric-label">Future Distance</div>
+            <div class="apple-metric-val">+{horizon_length} Days</div>
+            <div class="apple-metric-sub" style="color: #86868B;">{(horizon_length/365.25):.1f} Years ahead</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
+        # Plotly Drag & Pan Interactive Graph
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=input_dates, y=input_series, mode="lines", name="Historical Data", line=dict(color="#2563EB", width=2)))
-        fig.add_trace(go.Scatter(x=future_dates, y=upper_bound, mode="lines", line=dict(width=0), showlegend=False))
-        fig.add_trace(go.Scatter(x=future_dates, y=lower_bound, mode="lines", line=dict(width=0), fill="tonexty", fillcolor="rgba(239, 68, 68, 0.15)", name="80% Confidence Interval"))
-        fig.add_trace(go.Scatter(x=future_dates, y=point_forecast, mode="lines+markers", name="TimesFM Prediction", line=dict(color="#DC2626", width=2.5, dash="dash")))
+        
+        # Past Historical Line
+        fig.add_trace(go.Scatter(
+            x=input_dates, 
+            y=input_series, 
+            mode="lines", 
+            name="Historical Data", 
+            line=dict(color="#0071E3", width=2.5),
+            hovertemplate="<b>Date</b>: %{x|%b %d, %Y}<br><b>Value</b>: %{y:,.2f}<extra></extra>"
+        ))
+        
+        # TimesFM Prediction Line
+        fig.add_trace(go.Scatter(
+            x=future_dates, 
+            y=upper_bound, 
+            mode="lines", 
+            line=dict(width=0), 
+            showlegend=False,
+            hoverinfo="skip"
+        ))
+        fig.add_trace(go.Scatter(
+            x=future_dates, 
+            y=lower_bound, 
+            mode="lines", 
+            line=dict(width=0), 
+            fill="tonexty", 
+            fillcolor="rgba(255, 45, 85, 0.12)", 
+            name="80% Confidence Interval",
+            hoverinfo="skip"
+        ))
+        fig.add_trace(go.Scatter(
+            x=future_dates, 
+            y=point_forecast, 
+            mode="lines+markers", 
+            name="TimesFM Forecast", 
+            line=dict(color="#FF2D55", width=2.5, dash="dash"),
+            marker=dict(size=4),
+            hovertemplate="<b>Forecast Date</b>: %{x|%b %d, %Y}<br><b>Predicted</b>: %{y:,.2f}<extra></extra>"
+        ))
 
-        fig.update_layout(title=f"Forecast for {target_col}", xaxis_title="Date", yaxis_title=target_col, template="plotly_white", height=500)
-        st.plotly_chart(fig, use_container_width=True)
+        # Divider line marking "Today"
+        fig.add_vline(
+            x=last_date.timestamp() * 1000, 
+            line_width=1.5, 
+            line_dash="dot", 
+            line_color="#86868B",
+            annotation_text="Today / Forecast Start",
+            annotation_position="top left",
+            annotation_font=dict(size=12, color="#86868B")
+        )
+
+        fig.update_layout(
+            title=dict(text=f"Historical & TimesFM Projection: {target_col}", font=dict(size=18, color="#1D1D1F")),
+            template="plotly_white",
+            height=530,
+            dragmode="pan", # Enable smooth drag and panning across history
+            xaxis=dict(
+                title="Timeline (Years & Dates)",
+                type="date",
+                rangeslider=dict(visible=True), # Bottom interactive range slider
+                rangeselector=dict(
+                    buttons=list([
+                        dict(count=6, label="6m", step="month", stepmode="backward"),
+                        dict(count=1, label="1y", step="year", stepmode="backward"),
+                        dict(count=5, label="5y", step="year", stepmode="backward"),
+                        dict(step="all", label="All History")
+                    ])
+                )
+            ),
+            yaxis=dict(title=target_col, tickformat=",.2f"),
+            hovermode="x unified",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+
+        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displayModeBar": True})
 
 
 # -----------------------------------------------------------------------------
-# TAB 2: Direct Gemini -> TimesFM Pipeline Integration
+# TAB 2: Direct Gemini AI ➔ Google TimesFM Pipeline with Clear Timeline
 # -----------------------------------------------------------------------------
 with main_tab2:
-    st.subheader("💡 Natural Language Pipeline (Gemini AI ➔ Google TimesFM)")
     st.markdown("""
-    Type any request. **Gemini AI** will research the metric and build the historical data series, then pass that exact dataset straight into **Google TimesFM** to calculate the future forecast graph.
-    """)
+    <div style="background: #FFFFFF; border-radius: 16px; padding: 20px; border: 1px solid rgba(0,0,0,0.06); margin-bottom: 20px;">
+        <h4 style="margin: 0 0 6px 0; color: #1D1D1F;">💬 Ask Gemini AI + TimesFM Anything</h4>
+        <p style="margin: 0; color: #86868B; font-size: 0.95rem;">
+            Type a natural language request (e.g. <i>"Predict real estate price trend in Zurich for the next 5 years"</i> or <i>"Predict global solar energy adoption rate"</i>). 
+            <b>Gemini AI</b> researches the topic and builds a clean historical series with real years, and <b>Google TimesFM</b> runs the math to project the graph into the future.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
     if not gemini_key:
-        st.warning("🔑 Please enter your Gemini API Key in the sidebar to activate natural language prediction.")
+        st.warning("🔑 Please enter your Gemini API Key in the sidebar to run AI natural language predictions.")
     elif not HAS_GEMINI:
-        st.error("Please ensure `google-generativeai` is listed in `requirements.txt`.")
+        st.error("Missing package `google-generativeai` in `requirements.txt`.")
     else:
         genai.configure(api_key=gemini_key)
         
         user_prompt = st.text_input(
             "Enter your prediction query:", 
-            placeholder="e.g. Predict real estate price index in Luzern for the next 5 years."
+            placeholder="e.g. Predict Zurich housing price index over the next 5 years"
         )
 
-        if st.button("🚀 Run Gemini ➔ TimesFM Forecast", type="primary"):
+        if st.button("🚀 Run Gemini ➔ TimesFM Prediction Pipeline", type="primary"):
             if user_prompt:
-                # Step 1: Gemini retrieves and structures context data
-                with st.spinner("Step 1/2: Gemini AI is analyzing topic & gathering historical benchmark series..."):
+                current_year = datetime.now().year
+                
+                # Step 1: Gemini contextual research
+                with st.spinner("Step 1/2: Gemini AI is researching context & building historical timeline..."):
                     try:
-                        system_instruction = """
-                        You are an expert economic researcher.
-                        The user will ask you a predictive question.
-                        Research the historical context and provide strictly valid JSON containing:
-                        1. "qualitative_analysis": Comprehensive explanation of key drivers, macroeconomic conditions, or political odds.
-                        2. "historical_proxy": An array of at least 32 numbers representing sequential historical benchmark values leading up to today.
-                        3. "unit": Unit of measurement (e.g. "CHF/m²", "Index Points", "% Probability").
-                        4. "title": Concise title for this series.
+                        system_instruction = f"""
+                        You are an expert economic and statistical researcher.
+                        The user will ask you a prediction question.
+                        Research the historical context and return STRICTLY valid JSON with:
+                        1. "title": Short clean title for the metric.
+                        2. "qualitative_analysis": 2-3 clear paragraphs explaining key real-world drivers, market conditions, and future risks.
+                        3. "unit": Unit of measurement (e.g. "CHF / m²", "Index (Base 100)", "USD / Barrel").
+                        4. "start_year": Integer starting year for history (e.g. {current_year - 6}).
+                        5. "historical_series": An array of 24 to 36 sequential historical numerical values ending at present year ({current_year}).
+                        6. "step_frequency": String indicating time step: "Yearly", "Quarterly", or "Monthly".
                         
-                        Respond ONLY with valid JSON string.
+                        Respond ONLY with raw valid JSON. No markdown wrappers.
                         """
                         
                         raw_response, active_model_used = call_gemini_with_fallback(system_instruction, user_prompt)
                         ai_data = parse_gemini_json(raw_response)
 
-                        # Display Gemini's qualitative finding
-                        st.markdown(f'<div class="ai-box"><b>🤖 Step 1 Result: Gemini AI Context Analysis [{active_model_used}]</b><br><br>{ai_data.get("qualitative_analysis")}</div>', unsafe_allow_html=True)
+                        # Render Apple-style AI Insight Box
+                        st.markdown(f'''
+                        <div class="ai-insight-card">
+                            <div class="ai-insight-title">
+                                <span>🤖 Gemini AI Contextual Insight ({ai_data.get("title", "Analysis")})</span>
+                                <span style="font-size: 0.75rem; background: #E8F2FD; color: #0071E3; padding: 3px 8px; border-radius: 12px; font-weight: 500;">
+                                    Model: {active_model_used}
+                                </span>
+                            </div>
+                            <div class="ai-insight-body">
+                                {ai_data.get("qualitative_analysis")}
+                            </div>
+                        </div>
+                        ''', unsafe_allow_html=True)
 
-                        # Step 2: Feed Gemini's structured array directly into Google TimesFM
-                        proxy_series = np.array(ai_data.get("historical_proxy", [100]*32), dtype=np.float32)
+                        # Step 2: Extract historical values & build realistic Datetime objects
+                        hist_vals = np.array(ai_data.get("historical_series", [100]*24), dtype=np.float32)
                         unit = ai_data.get("unit", "Points")
+                        freq_type = ai_data.get("step_frequency", "Monthly")
+                        start_year = int(ai_data.get("start_year", current_year - 5))
 
-                        with st.spinner("Step 2/2: Passing Gemini's dataset into Google TimesFM for zero-shot forecasting..."):
+                        # Build clear timeline dates
+                        if freq_type.lower() == "yearly":
+                            hist_dates = pd.date_range(start=f"{start_year}-01-01", periods=len(hist_vals), freq="YS")
+                            fut_freq = "YS"
+                        elif freq_type.lower() == "quarterly":
+                            hist_dates = pd.date_range(start=f"{start_year}-01-01", periods=len(hist_vals), freq="QS")
+                            fut_freq = "QS"
+                        else: # Monthly default
+                            hist_dates = pd.date_range(start=f"{start_year}-01-01", periods=len(hist_vals), freq="MS")
+                            fut_freq = "MS"
+
+                        # Step 3: Direct TimesFM Mathematical Prediction
+                        with st.spinner("Step 2/2: Passing Gemini dataset into Google TimesFM model..."):
                             if tfm_model is not None:
                                 try:
-                                    # Calling Google TimesFM directly on Gemini's data
-                                    tfm_out, q_out = tfm_model.forecast([proxy_series], freq=[freq_option])
+                                    tfm_out, _ = tfm_model.forecast([hist_vals], freq=[0])
                                     p_forecast = tfm_out[0]
-                                    std_dev = np.std(proxy_series[-10:]) if len(proxy_series) >= 10 else np.std(proxy_series)
+                                    std_dev = np.std(hist_vals[-6:]) if len(hist_vals) >= 6 else np.std(hist_vals)
                                     l_bound = p_forecast - 1.645 * std_dev
                                     u_bound = p_forecast + 1.645 * std_dev
-                                    engine_badge = "Google TimesFM Transformer Weights"
+                                    engine_label = "Google TimesFM Transformer Weights"
                                 except Exception:
-                                    p_forecast, l_bound, u_bound = run_forecast_simulation(proxy_series, horizon_length)
-                                    engine_badge = "Baseline Projection Simulation"
+                                    p_forecast, l_bound, u_bound = run_forecast_simulation(hist_vals, horizon_length)
+                                    engine_label = "Statistical Baseline Engine"
                             else:
-                                p_forecast, l_bound, u_bound = run_forecast_simulation(proxy_series, horizon_length)
-                                engine_badge = "Baseline Projection Simulation"
+                                p_forecast, l_bound, u_bound = run_forecast_simulation(hist_vals, horizon_length)
+                                engine_label = "Statistical Baseline Engine"
 
-                        # Visualization of Gemini Historical Data + TimesFM Prediction
-                        hist_x = [f"Hist-{len(proxy_series)-i}" for i in range(len(proxy_series))]
-                        fut_x = [f"Step+{i+1}" for i in range(horizon_length)]
+                        # Generate clear Future Date timeline
+                        last_hist_date = hist_dates[-1]
+                        fut_dates = pd.date_range(start=last_hist_date + pd.Timedelta(days=28), periods=horizon_length, freq=fut_freq)
+                        
+                        last_val = float(hist_vals[-1])
+                        end_val = float(p_forecast[-1])
+                        growth_pct = ((end_val - last_val) / last_val) * 100
 
+                        # Summary Metrics
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.markdown(f'''
+                        <div class="apple-card">
+                            <div class="apple-metric-label">Historical Baseline</div>
+                            <div class="apple-metric-val">{last_val:,.2f} {unit}</div>
+                            <div class="apple-metric-sub" style="color: #86868B;">As of {last_hist_date.strftime("%Y")}</div>
+                        </div>
+                        ''', unsafe_allow_html=True)
+
+                        m2.markdown(f'''
+                        <div class="apple-card">
+                            <div class="apple-metric-label">TimesFM Target</div>
+                            <div class="apple-metric-val">{end_val:,.2f} {unit}</div>
+                            <div class="apple-metric-sub" style="color: #86868B;">By Year {fut_dates[-1].strftime("%Y")}</div>
+                        </div>
+                        ''', unsafe_allow_html=True)
+
+                        g_color = "#10B981" if growth_pct >= 0 else "#EF4444"
+                        m3.markdown(f'''
+                        <div class="apple-card">
+                            <div class="apple-metric-label">Projected Shift</div>
+                            <div class="apple-metric-val" style="color: {g_color};">{growth_pct:+.2f}%</div>
+                            <div class="apple-metric-sub" style="color: {g_color};">Net expected change</div>
+                        </div>
+                        ''', unsafe_allow_html=True)
+
+                        m4.markdown(f'''
+                        <div class="apple-card">
+                            <div class="apple-metric-label">Timeline Horizon</div>
+                            <div class="apple-metric-val">{hist_dates[0].strftime("%Y")} ➔ {fut_dates[-1].strftime("%Y")}</div>
+                            <div class="apple-metric-sub" style="color: #86868B;">+{horizon_length} {freq_type} Steps</div>
+                        </div>
+                        ''', unsafe_allow_html=True)
+
+                        # Interactive Graph for Gemini + TimesFM
                         fig_ai = go.Figure()
-                        # Gemini's Historical context line
+                        
+                        # Gemini Historical Line
                         fig_ai.add_trace(go.Scatter(
-                            x=hist_x, 
-                            y=proxy_series, 
+                            x=hist_dates, 
+                            y=hist_vals, 
                             mode="lines+markers", 
-                            name="Gemini Historical Benchmark", 
-                            line=dict(color="#0284C7", width=2)
+                            name="Gemini Historical Data", 
+                            line=dict(color="#0071E3", width=2.5),
+                            marker=dict(size=5),
+                            hovertemplate="<b>Year / Date</b>: %{x|%b %Y}<br><b>Value</b>: %{y:,.2f} " + unit + "<extra></extra>"
                         ))
                         
-                        # TimesFM Upper/Lower bounds
-                        fig_ai.add_trace(go.Scatter(x=fut_x, y=u_bound, mode="lines", line=dict(width=0), showlegend=False))
+                        # TimesFM Future Forecast Bounds
+                        fig_ai.add_trace(go.Scatter(x=fut_dates, y=u_bound, mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"))
                         fig_ai.add_trace(go.Scatter(
-                            x=fut_x, 
+                            x=fut_dates, 
                             y=l_bound, 
                             mode="lines", 
                             line=dict(width=0), 
                             fill="tonexty", 
-                            fillcolor="rgba(16, 185, 129, 0.15)", 
-                            name="TimesFM Confidence Band"
+                            fillcolor="rgba(52, 199, 89, 0.15)", 
+                            name="TimesFM Confidence Range",
+                            hoverinfo="skip"
                         ))
                         
-                        # TimesFM Prediction output line
+                        # TimesFM Future Forecast Line
                         fig_ai.add_trace(go.Scatter(
-                            x=fut_x, 
+                            x=fut_dates, 
                             y=p_forecast, 
                             mode="lines+markers", 
-                            name=f"TimesFM Prediction ({engine_badge})", 
-                            line=dict(color="#10B981", width=2.5, dash="dash")
+                            name=f"TimesFM Forecast ({engine_label})", 
+                            line=dict(color="#34C759", width=2.5, dash="dash"),
+                            marker=dict(size=5),
+                            hovertemplate="<b>Future Date</b>: %{x|%b %Y}<br><b>Forecast</b>: %{y:,.2f} " + unit + "<extra></extra>"
                         ))
 
-                        fig_ai.update_layout(
-                            title=f"TimesFM Forecast on Gemini Data: {ai_data.get('title')}", 
-                            yaxis_title=unit, 
-                            template="plotly_white", 
-                            height=480
+                        # Vertical Today Divider Line
+                        fig_ai.add_vline(
+                            x=last_hist_date.timestamp() * 1000, 
+                            line_width=1.5, 
+                            line_dash="dot", 
+                            line_color="#86868B",
+                            annotation_text="Present Baseline",
+                            annotation_position="top left",
+                            annotation_font=dict(size=12, color="#86868B")
                         )
-                        st.plotly_chart(fig_ai, use_container_width=True)
+
+                        fig_ai.update_layout(
+                            title=dict(text=f"Hybrid AI Forecast: {ai_data.get('title')}", font=dict(size=18, color="#1D1D1F")),
+                            yaxis_title=unit,
+                            template="plotly_white",
+                            height=520,
+                            dragmode="pan", # Drag and Pan history seamlessly
+                            xaxis=dict(
+                                title="Years & Calendar Dates",
+                                type="date",
+                                rangeslider=dict(visible=True) # Bottom range slider bar
+                            ),
+                            hovermode="x unified",
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        )
+                        
+                        st.plotly_chart(fig_ai, use_container_width=True, config={"scrollZoom": True, "displayModeBar": True})
 
                     except Exception as e:
-                        st.error(f"Pipeline Execution Error: {str(e)}")
+                        st.error(f"Pipeline Error: {str(e)}")
