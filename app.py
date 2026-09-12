@@ -9,7 +9,7 @@ import time
 import json
 import os
 
-# Optional Gemini API import
+# Gemini API import check
 try:
     import google.generativeai as genai
     HAS_GEMINI = True
@@ -17,7 +17,7 @@ except ImportError:
     HAS_GEMINI = False
 
 # -----------------------------------------------------------------------------
-# 1. Page Configuration & Styling
+# 1. Page Configuration & Custom Styling
 # -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="TimesFM & Gemini Predictive Intelligence Studio",
@@ -67,7 +67,7 @@ st.markdown("""
 
 
 # -----------------------------------------------------------------------------
-# 2. TimesFM Loader & Simulation Fallback
+# 2. TimesFM Model Loader & Simulation Engine
 # -----------------------------------------------------------------------------
 @st.cache_resource(show_spinner="Loading Google TimesFM Model Weights...")
 def load_timesfm_model(model_name, backend, context_len, horizon_len):
@@ -105,18 +105,48 @@ def run_forecast_simulation(data_series, horizon_len):
     return simulated_point, lower_bound, upper_bound
 
 
+def get_active_gemini_model():
+    """
+    Dynamically queries Google Generative AI API for active models available to this key
+    to prevent 404 alias errors.
+    """
+    try:
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # Priority preferences for model selection
+        preferences = [
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-flash-latest",
+            "gemini-1.5-flash",
+            "gemini-2.5-pro",
+            "gemini-1.5-pro",
+        ]
+        
+        for pref in preferences:
+            for m in models:
+                if pref in m:
+                    return m
+        
+        if models:
+            return models[0]
+    except Exception:
+        pass
+    
+    return "gemini-flash-latest"
+
+
 # -----------------------------------------------------------------------------
-# 3. Sidebar Controls & API Keys
+# 3. Sidebar Controls
 # -----------------------------------------------------------------------------
 st.sidebar.title("⚙️ Engine Controls")
 
-# Gemini API Key integration
 st.sidebar.subheader("🔑 Gemini AI Integration")
 gemini_key = st.sidebar.text_input(
     "Gemini API Key", 
     type="password", 
     value=os.environ.get("GEMINI_API_KEY", ""),
-    help="Enter your Google Gemini API key to enable natural language predictive intelligence."
+    help="Enter your Google Gemini API key."
 )
 
 st.sidebar.subheader("🤖 TimesFM Model Settings")
@@ -131,7 +161,6 @@ model_choice = st.sidebar.selectbox(
 )
 
 backend_choice = st.sidebar.selectbox("Compute Backend", ["cpu", "cuda"], index=0)
-
 context_length = st.sidebar.slider("Context Length (Lookback)", 32, 1024, 256, 32)
 horizon_length = st.sidebar.slider("Forecast Horizon", 7, 365, 30, 1)
 
@@ -144,7 +173,6 @@ freq_option = st.sidebar.selectbox(
         2: "Quarterly / Yearly (2)"
     }[x]
 )
-
 
 # -----------------------------------------------------------------------------
 # 4. Data Selector (Commodities, Macro, Stocks, Custom)
@@ -166,8 +194,8 @@ target_col = "Value"
 date_col = "Date"
 
 COMMODITIES_MAP = {
-    "Crude Oil WTI (CL=F)": "CL=F",
     "Gold Futures (GC=F)": "GC=F",
+    "Crude Oil WTI (CL=F)": "CL=F",
     "Silver Futures (SI=F)": "SI=F",
     "Brent Crude Oil (BZ=F)": "BZ=F",
     "Natural Gas (NG=F)": "NG=F",
@@ -253,7 +281,6 @@ st.markdown('<div class="sub-header">Zero-shot Time Series Forecasting & LLM Pre
 
 main_tab1, main_tab2 = st.tabs(["📊 TimesFM Forecasting Studio", "🤖 Gemini Natural Language Predictor"])
 
-# Shared TimesFM Execution Function
 tfm_model, _ = load_timesfm_model(model_choice, backend_choice, context_length, horizon_length)
 
 # -----------------------------------------------------------------------------
@@ -283,7 +310,6 @@ with main_tab1:
             else:
                 point_forecast, lower_bound, upper_bound = run_forecast_simulation(input_series, horizon_length)
 
-        # Metrics
         last_actual = float(input_series[-1])
         pred_end = float(point_forecast[-1])
         pct_change = ((pred_end - last_actual) / last_actual) * 100
@@ -297,7 +323,6 @@ with main_tab1:
 
         st.write("")
 
-        # Plotly Graph
         last_date = pd.to_datetime(input_dates[-1])
         future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon_length, freq='D')
 
@@ -312,71 +337,68 @@ with main_tab1:
 
 
 # -----------------------------------------------------------------------------
-# TAB 2: Gemini Natural Language & Hybrid Predictor
+# TAB 2: Gemini Natural Language Predictor with Dynamic Model Resolver
 # -----------------------------------------------------------------------------
 with main_tab2:
     st.subheader("💡 Ask Gemini AI Anything to Predict")
     st.markdown("""
-    Type any open question or domain specific query (e.g., *'Predict the real estate price trend for Luzern, Switzerland'*, *'Who will win the next US Presidential election and what are the market odds?'*, or *'Predict global lithium prices'*).
+    Ask questions like: *'Predict the real estate price trend for Luzern, Switzerland'*, *'Who will win the next presidential election and what are the economic odds?'*, or *'Predict global lithium demand'*.
     """)
 
     if not gemini_key:
         st.warning("🔑 Please enter your Gemini API Key in the sidebar to activate natural language prediction.")
     elif not HAS_GEMINI:
-        st.error("Please ensure `google-generativeai` is installed in your requirements.txt.")
+        st.error("Please ensure `google-generativeai` is listed in `requirements.txt`.")
     else:
         genai.configure(api_key=gemini_key)
         
         user_prompt = st.text_input(
-            "Enter your predictive question:", 
+            "Enter your predictive query:", 
             placeholder="e.g. Predict real estate price index in Luzern for the next 5 years."
         )
 
         if st.button("🚀 Run Hybrid Prediction", type="primary"):
             if user_prompt:
-                with st.spinner("Gemini is analyzing market data, geopolitics, and historic baselines..."):
+                with st.spinner("Resolving available Gemini model and analyzing market context..."):
                     try:
-                        # Request structured output from Gemini
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        
+                        # Auto-detect supported active model for this API key
+                        active_model_name = get_active_gemini_model()
+                        model = genai.GenerativeModel(active_model_name)
+
                         system_instruction = """
                         You are an expert economic and quantitative forecasting AI.
                         The user will ask you a predictive question.
-                        Respond with JSON containing:
+                        Respond strictly with JSON containing:
                         1. "qualitative_analysis": Detailed explanation of key drivers, risks, geopolitical context, or event odds.
                         2. "historical_proxy": An array of 12 numbers representing recent historical benchmark/index values.
                         3. "unit": The unit of measurement (e.g. "CHF/m²", "Index Points", "Probability %").
                         4. "title": Short title for the metric.
                         
-                        Respond ONLY with valid JSON.
+                        Respond ONLY with valid JSON string. Do not add formatting markdown outside JSON.
                         """
                         
                         response = model.generate_content(f"{system_instruction}\nUser Query: {user_prompt}")
                         clean_json = response.text.replace("```json", "").replace("```", "").strip()
                         ai_data = json.loads(clean_json)
 
-                        # Render Gemini Analysis
-                        st.markdown(f'<div class="ai-box"><b>🤖 Gemini AI Strategic Assessment ({ai_data.get("title", "Analysis")}):</b><br><br>{ai_data.get("qualitative_analysis")}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="ai-box"><b>🤖 Gemini AI Strategic Assessment ({ai_data.get("title", "Analysis")}) [Model: {active_model_name}]:</b><br><br>{ai_data.get("qualitative_analysis")}</div>', unsafe_allow_html=True)
 
-                        # Extract proxy numerical data and pass to TimesFM
                         proxy_series = np.array(ai_data.get("historical_proxy", [100]*12), dtype=np.float32)
                         unit = ai_data.get("unit", "Points")
 
-                        # TimesFM Execution on Gemini Generated Data
                         p_forecast, l_bound, u_bound = run_forecast_simulation(proxy_series, horizon_length)
 
-                        # Visualization
                         hist_x = [f"T-{len(proxy_series)-i}" for i in range(len(proxy_series))]
                         fut_x = [f"T+{i+1}" for i in range(horizon_length)]
 
                         fig_ai = go.Figure()
-                        fig_ai.add_trace(go.Scatter(x=hist_x, y=proxy_series, mode="lines+markers", name="Historical Proxy / Baseline", line=dict(color="#0284C7", width=2)))
+                        fig_ai.add_trace(go.Scatter(x=hist_x, y=proxy_series, mode="lines+markers", name="Historical Baseline", line=dict(color="#0284C7", width=2)))
                         fig_ai.add_trace(go.Scatter(x=fut_x, y=u_bound, mode="lines", line=dict(width=0), showlegend=False))
                         fig_ai.add_trace(go.Scatter(x=fut_x, y=l_bound, mode="lines", line=dict(width=0), fill="tonexty", fillcolor="rgba(16, 185, 129, 0.15)", name="80% Bounds"))
                         fig_ai.add_trace(go.Scatter(x=fut_x, y=p_forecast, mode="lines+markers", name="TimesFM Extrapolation", line=dict(color="#10B981", width=2.5, dash="dash")))
 
-                        fig_ai.update_layout(title=f"Hybrid Forecast Model: {ai_data.get('title')}", yaxis_title=unit, template="plotly_white", height=480)
+                        fig_ai.update_layout(title=f"Hybrid Model Projection: {ai_data.get('title')}", yaxis_title=unit, template="plotly_white", height=480)
                         st.plotly_chart(fig_ai, use_container_width=True)
 
                     except Exception as e:
-                        st.error(f"Error parsing Gemini response: {str(e)}")
+                        st.error(f"Execution Error: {str(e)}")
